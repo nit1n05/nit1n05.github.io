@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Whiteboard Notebook</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <meta name="theme-color" content="#2f6fed">
+  <style>
+    :root {
+      --bg: #f6f4ef;
+      --card: #fff;
+      --ink: #1d1d1b;
+      --mute: #6d6b66;
+      --acc: #2f6fed;
+      --line: #e1ded6;
+      --danger: #c0392b;
+      box-sizing: border-box;
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #17171a;
+        --card: #232328;
+        --ink: #f1f0ec;
+        --mute: #9b9a95;
+        --acc: #6b9bff;
+        --line: #34343b;
+        --danger: #ff7b6b;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #17171a;
+      --card: #232328;
+      --ink: #f1f0ec;
+      --mute: #9b9a95;
+      --acc: #6b9bff;
+      --line: #34343b;
+      --danger: #ff7b6b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      max-width: 720px;
+      margin-inline: auto;
+      padding: 16px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    h1 { font-size: 1.25rem; margin: 0; }
+    .count { color: var(--mute); font-size: 0.9rem; }
+    button, .btn {
+      font: inherit;
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--ink);
+      padding: 10px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      display: inline-block;
+    }
+    .primary {
+      background: var(--acc);
+      color: #fff;
+      border-color: var(--acc);
+      font-weight: 600;
+    }
+    .danger { color: var(--danger); }
+    .bar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 10px 0;
+    }
+    .viewer {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 10px;
+    }
+    .viewer img {
+      width: 100%;
+      border-radius: 8px;
+      display: block;
+      max-height: 70vh;
+      object-fit: contain;
+      background: #0001;
+    }
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 10px;
+      gap: 8px;
+    }
+    input.title {
+      width: 100%;
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: var(--bg);
+      color: var(--ink);
+      font: inherit;
+    }
+    .empty {
+      text-align: center;
+      color: var(--mute);
+      padding: 48px 12px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 10px;
+    }
+    .grid figure {
+      margin: 0;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .grid img {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      object-fit: cover;
+      display: block;
+    }
+    .grid figcaption {
+      font-size: 0.8rem;
+      padding: 6px 8px;
+      color: var(--mute);
+    }
+    .hidden { display: none; }
+    #msg {
+      color: var(--danger);
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📓 Whiteboard Notebook</h1>
+    <span class="count" id="count"></span>
+  </header>
+
+  <div class="bar">
+    <label class="btn primary">📷 Add page
+      <input id="cam" type="file" accept="image/*" capture="environment" hidden>
+    </label>
+    <button id="toggle">🗂 All pages</button>
+  </div>
+
+  <div id="msg"></div>
+
+  <section id="viewer" class="viewer hidden">
+    <img id="img" alt="Notebook page">
+    <input class="title" id="title" placeholder="Page title (e.g. Trees – Lecture 4)">
+    <div class="nav">
+      <button id="prev">← Prev</button>
+      <strong id="pos"></strong>
+      <button id="next">Next →</button>
+    </div>
+    <div class="bar">
+      <button id="dl">⬇ Download</button>
+      <button id="del" class="danger">🗑 Delete</button>
+    </div>
+  </section>
+
+  <section id="gallery" class="grid hidden"></section>
+
+  <div id="empty" class="empty">
+    No pages yet.<br>
+    Tap <b>Add page</b> and photograph your whiteboard.
+  </div>
+
+  <script>
+    let db, pages = [], idx = 0, urls = [];
+    const $ = id => document.getElementById(id);
+    const say = t => $('msg').textContent = t || '';
+
+    function openDB() {
+      return new Promise((res, rej) => {
+        const request = indexedDB.open('whiteboard-notebook', 1);
+        request.onupgradeneeded = () => {
+          request.result.createObjectStore('pages', { keyPath: 'id', autoIncrement: true });
+        };
+        request.onsuccess = () => res(request.result);
+        request.onerror = () => rej(request.error);
+      });
+    }
+
+    const tx = (mode, fn) => new Promise((res, rej) => {
+      const t = db.transaction('pages', mode);
+      const s = t.objectStore('pages');
+      const q = fn(s);
+
+      t.oncomplete = () => res(q && q.result);
+      t.onerror = () => rej(t.error);
+    });
+
+    const loadAll = async () => {
+      pages = (await tx('readonly', s => s.getAll())) || [];
+      pages.sort((a, b) => a.id - b.id);
+    };
+
+    async function shrink(file, max = 1800) {
+      const bmp = await createImageBitmap(file);
+      const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(bmp.width * k);
+      c.height = Math.round(bmp.height * k);
+      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+      return new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
+    }
+
+    function render() {
+      urls.forEach(URL.revokeObjectURL);
+      urls = pages.map(p => URL.createObjectURL(p.blob));
+
+      const has = pages.length > 0;
+      $('empty').classList.toggle('hidden', has);
+      $('count').textContent = has ? pages.length + (pages.length === 1 ? ' page' : ' pages') : '';
+
+      if (!has) {
+        $('viewer').classList.add('hidden');
+        $('gallery').classList.add('hidden');
+        return;
+      }
+
+      idx = Math.max(0, Math.min(idx, pages.length - 1));
+      const p = pages[idx];
+      $('img').src = urls[idx];
+      $('title').value = p.title || '';
+      $('pos').textContent = 'Page ' + (idx + 1) + ' / ' + pages.length;
+      $('prev').disabled = idx === 0;
+      $('next').disabled = idx === pages.length - 1;
+
+      $('gallery').innerHTML = '';
+      pages.forEach((q, i) => {
+        const f = document.createElement('figure');
+        f.innerHTML = '<img alt=""><figcaption></figcaption>';
+        f.querySelector('img').src = urls[i];
+        f.querySelector('figcaption').textContent = (i + 1) + '. ' + (q.title || new Date(q.created).toLocaleDateString());
+        f.onclick = () => {
+          idx = i;
+          showGallery(false);
+          render();
+        };
+        $('gallery').appendChild(f);
+      });
+    }
+
+    function showGallery(on) {
+      $('gallery').classList.toggle('hidden', !on || !pages.length);
+      $('viewer').classList.toggle('hidden', on || !pages.length);
+      $('toggle').textContent = on ? '📖 Back to page' : '🗂 All pages';
+    }
+
+    let galleryOn = false;
+
+    $('cam').onchange = async e => {
+      const f = e.target.files[0];
+      if (!f) return;
+
+      try {
+        say('Saving…');
+        const blob = await shrink(f);
+        await tx('readwrite', s => s.add({ blob, title: '', created: Date.now() }));
+        await loadAll();
+        idx = pages.length - 1;
+        galleryOn = false;
+        render();
+        showGallery(false);
+        say('');
+      } catch (err) {
+        say('Could not save this photo: ' + err.message);
+      }
+
+      e.target.value = '';
+    };
+
+    $('title').onchange = async () => {
+      const p = pages[idx];
+      p.title = $('title').value;
+      await tx('readwrite', s => s.put(p));
+      render();
+    };
+
+    $('prev').onclick = () => { idx--; render(); };
+    $('next').onclick = () => { idx++; render(); };
+    $('toggle').onclick = () => {
+      galleryOn = !galleryOn;
+      showGallery(galleryOn);
+    };
+
+    $('del').onclick = async () => {
+      if (!confirm('Delete this page for good?')) return;
+      await tx('readwrite', s => s.delete(pages[idx].id));
+      await loadAll();
+      render();
+      showGallery(false);
+    };
+
+    $('dl').onclick = () => {
+      const a = document.createElement('a');
+      a.href = urls[idx];
+      a.download = 'whiteboard-page-' + (idx + 1) + '.jpg';
+      a.click();
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+
+    (async () => {
+      try {
+        db = await openDB();
+        await loadAll();
+        render();
+        showGallery(false);
+      } catch (err) {
+        say('Storage is not available in this browser, so pages cannot be saved.');
+      }
+    })();
+  </script>
+</body>
+</html>
